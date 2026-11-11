@@ -1,0 +1,170 @@
+name: Build MDM NATIVE Portable (Rust source)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable upstream version, e.g. 0.5.2, or latest'
+        required: true
+        default: 'latest'
+        type: string
+      revision:
+        description: 'Builder/package revision; increment after changing build logic'
+        required: true
+        default: 'b1r2'
+        type: string
+      publish:
+        description: 'Publish ZIP as a release after independent validation'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mdm-native-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout independent builder repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python static tests - no Windows registry touched
+        run: |
+          python --version
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Builder static tests failed' }
+
+      - name: Verify release publisher v1.1.1 action interface and immutable commit
+        run: |
+          python scripts/verify_publisher.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned publisher verification failed' }
+
+      - name: Resolve stable release and exact upstream source commit
+        id: upstream
+        env:
+          MDM_VERSION: ${{ inputs.version }}
+          MDM_REVISION: ${{ inputs.revision }}
+        run: |
+          python scripts/resolve_release.py --version "$env:MDM_VERSION" --revision "$env:MDM_REVISION"
+          if ($LASTEXITCODE -ne 0) { throw 'Stable release resolution failed' }
+
+      - name: Skip identical already-published source/build/revision
+        id: existing
+        run: |
+          python scripts/check_release.py
+          if ($LASTEXITCODE -ne 0) { throw 'Existing-release validation failed' }
+
+      - name: Update Microsoft MSVC Rust stable (upstream requires 1.95+)
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          rustup update stable --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain update failed' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust stable selection failed' }
+          rustc --version
+          cargo --version
+
+      - name: Clone only the resolved published upstream stable tag
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          $id = Get-Content build-identity.json -Raw | ConvertFrom-Json
+          git clone --depth 1 --branch "$($id.upstream_tag)" --single-branch https://github.com/anefzaoui/misterdownloadmanager.git upstream
+          if ($LASTEXITCODE -ne 0) { throw 'Upstream clone failed' }
+          $actual = (git -C upstream rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $id.upstream_sha) { throw "Source commit mismatch: $actual" }
+          if (-not (Test-Path upstream/Cargo.lock)) { throw 'Missing upstream dependency lockfile' }
+          Write-Host "Verified source $($id.upstream_tag) at $actual"
+
+      - name: Apply strict NATIVE local-data source adapter
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          python scripts/apply_adapter.py --upstream upstream
+          if ($LASTEXITCODE -ne 0) { throw 'Native adapter could not be applied safely' }
+          git -C upstream diff -- crates/ipc/src/lib.rs
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect source patch' }
+
+      - name: Fetch and compile actual Rust Windows x64 application from source
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          Push-Location upstream
+          try {
+            cargo fetch --locked
+            if ($LASTEXITCODE -ne 0) { throw 'Cargo dependency retrieval failed' }
+            $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+            $env:CARGO_ENCODED_RUSTFLAGS = "--remap-path-prefix=$cargoHome=cargo" + [char]0x1f + "--remap-path-prefix=$((Get-Location).Path)=mdm"
+            try {
+              cargo build --release --locked -p mdm-app -p mdm-nmhost -p mdm-cli -p mdm-mcp
+              if ($LASTEXITCODE -ne 0) { throw 'Real Windows application compilation failed' }
+            } finally { Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue }
+          } finally { Pop-Location }
+
+      - name: Build official upstream extension resources from pinned source
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File upstream/tools/extension/pack.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Browser extension resource packaging failed' }
+
+      - name: Build source-derived NATIVE ZIP and identity report
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          python scripts/package_native.py --upstream upstream --output dist
+          if ($LASTEXITCODE -ne 0) { throw 'NATIVE staging/packaging failed' }
+
+      - name: Independently validate completed native ZIP
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          $zips = @(Get-ChildItem dist -Filter '*-NativePortable-*.zip' -File | Where-Object { $_.Name -notlike '*-SOURCE-*' })
+          if ($zips.Count -ne 1) { throw 'Expected exactly one application NATIVE ZIP' }
+          $sourceZips = @(Get-ChildItem dist -Filter '*-NativePortable-SOURCE-*.zip' -File)
+          if ($sourceZips.Count -ne 1) { throw 'Expected corresponding-source ZIP for GPL distribution' }
+          python scripts/validate_native.py --zip "$($zips[0].FullName)"
+          if ($LASTEXITCODE -ne 0) { throw 'NATIVE ZIP validation failed' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $sourceArchive = [System.IO.Compression.ZipFile]::OpenRead($sourceZips[0].FullName)
+          try {
+            $names = @($sourceArchive.Entries | ForEach-Object { $_.FullName })
+            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/upstream/Cargo.lock')) { throw 'Source ZIP missing Cargo.lock' }
+            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/upstream/crates/ipc/src/lib.rs')) { throw 'Source ZIP missing patched Rust source' }
+            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/builder/scripts/apply_adapter.py')) { throw 'Source ZIP missing source adapter' }
+          } finally { $sourceArchive.Dispose() }
+          Write-Host "Validated application SHA-256: $((Get-FileHash $zips[0].FullName -Algorithm SHA256).Hash.ToLower())"
+          Write-Host "Validated source SHA-256: $((Get-FileHash $sourceZips[0].FullName -Algorithm SHA256).Hash.ToLower())"
+
+      - name: Shared Release Publisher DRY RUN - required first
+        if: steps.existing.outputs.exists != 'true'
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1
+        with:
+          files: 'dist/MisterDownloadManager-*-NativePortable-*.zip'
+          tag: ${{ steps.upstream.outputs.release_tag }}
+          tag-prefix: 'portable-mdm-'
+          release-title: 'Mister Download Manager ${{ steps.upstream.outputs.version }} Native Portable (${{ inputs.revision }})'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+
+      - name: Publish independently validated NATIVE ZIP
+        if: steps.existing.outputs.exists != 'true' && inputs.publish == true
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1
+        with:
+          files: 'dist/MisterDownloadManager-*-NativePortable-*.zip'
+          tag: ${{ steps.upstream.outputs.release_tag }}
+          tag-prefix: 'portable-mdm-'
+          release-title: 'Mister Download Manager ${{ steps.upstream.outputs.version }} Native Portable (${{ inputs.revision }})'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'

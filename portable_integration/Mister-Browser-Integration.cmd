@@ -1,0 +1,8 @@
+@echo off
+setlocal
+rem Explicitly pass the script folder, not the current working directory.
+cd /d "%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0BrowserIntegration.ps1" -Action Menu -AppRoot "%~dp0."
+if errorlevel 1 echo Browser integration console returned an error.
+echo.
+pause

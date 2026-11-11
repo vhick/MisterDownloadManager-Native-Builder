@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.upstream/
+upstream/
+dist/
+*.tmp
+build-identity.json
