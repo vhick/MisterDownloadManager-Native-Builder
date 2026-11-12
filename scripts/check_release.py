@@ -14,7 +14,7 @@ url = f"https://api.github.com/repos/{repo}/releases/tags/{urllib.parse.quote(id
 request = urllib.request.Request(url, headers={
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'mdm-native-builder-b1r2',
+    'User-Agent': 'mdm-native-builder-b1r4',
     'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
 })
 try:
@@ -28,7 +28,7 @@ try:
     asset_names = {a.get('name', '') for a in record.get('assets', [])}
     expect = {
         f"MisterDownloadManager-{identity['version']}-NativePortable-{identity['builder_revision']}.zip",
-        f"MisterDownloadManager-{identity['version']}-NativePortable-SOURCE-{identity['builder_revision']}.zip",
+        f"MisterDownloadManager-{identity['version']}-NativePortable-SOURCE-PATCH-{identity['builder_revision']}.zip",
         'SHA256SUMS.txt',
     }
     if asset_names != expect:

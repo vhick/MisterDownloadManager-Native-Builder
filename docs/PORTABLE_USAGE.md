@@ -1,111 +1,49 @@
-# Mister Download Manager NATIVE portable usage
+# NATIVE portable use — unified manager b1r3
 
-This package is an **unofficial source-built** edition of Mister Download Manager.
-The main executable is `misterdownloadmanager.exe`. Launch it directly; neither
-PowerShell nor the manager is needed for ordinary operation.
+Mister Download Manager launches **directly** from `misterdownloadmanager.exe`. The optional `Mister-Manager.cmd` does not make the application portable; it only provides convenient lifecycle, Windows-startup and explicitly approved browser integration actions.
 
-## First run
+## First run — source-built native ZIP
 
-1. Extract the entire ZIP, including its `data` folder, to a writable location.
-2. Double-click `misterdownloadmanager.exe`.
-3. Verify `data` contains newly saved settings and download state after exiting.
-4. For browser downloads, run `Mister-Browser-Integration.cmd` and choose 1.
-5. Restart your browser and install the official MDM browser extension from its store.
-6. Test a download; if no capture, see the acceptance checklist.
+1. Extract the entire NATIVE ZIP to a writable folder, including `data/`.
+2. Start `misterdownloadmanager.exe` directly. Close, reopen, and confirm settings were retained in `data/`.
+3. If browser integration is desired, double-click `Mister-Manager.cmd` and choose main **4** → browser **1** (read-only status). If no old registrations conflict, choose browser **2** (Register/Repair).
+4. Restart the browser and test the official browser extension with a real download. This is an interactive Windows test, not a CI verification.
 
-### Existing official portable distribution: NO REBUILD NECESSARY
+## No-rebuild browser fix for the official portable MDM ZIP
 
-For browser integration alone, copy these two files from the kit's `portable_integration` folder:
+Copy **only** the two files below from the builder kit's `portable_integration/` folder into your existing official portable MDM folder, beside the application EXE and `misterdownloadmanager-nmhost.exe`:
 
-- `BrowserIntegration.ps1`
-- `Mister-Browser-Integration.cmd`
+- `Manager.ps1`
+- `Mister-Manager.cmd`
 
-For the optional manager too, copy `Manager.ps1` and `Mister-Manager.cmd` from
-the same folder. b1r2 fixes the PowerShell 5.1 path-resolution issue affecting
-all four console files.
+The portable folder must already have a writable `data/` directory. Back up your earlier manager files before replacing them; do **not** delete existing app binaries or `data/`. Unlike b1r1/b1r2, no extra browser/cleanup CMD consoles or PS1 files are needed.
 
-Copy them beside the **existing official portable** `misterdownloadmanager.exe`
-and `misterdownloadmanager-nmhost.exe`, with an existing writable `data/` folder.
-Run the CMD file and select Register. This is a deliberate browser-OS integration;
-portable downloads/settings remain in `data/`. It is not an invisible, registry-free
-solution. This path does **not** produce a newly compiled application.
+### Single-menu guide
 
-Do **not** run `misterdownloadmanager-nmhost.exe --register` on a portable copy.
-Upstream refuses it. Do not use the upstream `--unregister` as a cleanup shortcut:
-it does not distinguish our ownership records from an installed application's keys.
+**Main menu**: 1 Start; 2 Gracefully stop; 3 Status; 4 Browser integration; 5 Windows login autostart; 6 Open Data; 0 Exit.
 
-## Browser integration console
+**Browser menu**: 1 Show portable + old-installation registrations (read only); 2 Register/repair the portable browser host; 3 Unregister only this script's portable host (requires its ownership record); 4 Clean VERIFIED old HKCU registrations with `.reg` backup; 5 Clean VERIFIED old HKLM registrations with `.reg` backup (administrator required); 0 Back.
 
-- **Register/repair:** Creates only five per-user HKCU native-messaging host keys
-  if unoccupied (and no matching HKLM host), and two JSON manifests in `data/Integration`.
-- **Status:** Shows which keys are absent, registered by this console, or owned
-  by something else. Does not write registry state.
-- **Unregister:** Deletes only keys whose current values match the recorded
-  portable registration. Preserves backups and data.
-- **Repair after moving:** Move the **whole** folder (including `data`), then
-  run Register/repair again. The ownership journal lets it update its own
-  obsolete absolute paths only. Restart browsers afterwards.
+**Autostart menu**: 1 Status; 2 Enable; 3 Disable; 4 Repair after move; 0 Back.
 
-Supported host key families: Google Chrome, Chromium, Microsoft Edge,
-Brave Browser, Mozilla Firefox (other Chromium/Firefox forks may read these
-families; verify their actual native messaging policy). Browser store
-extension IDs must match those in the inspected source tag.
+## Preserving integration state and backups
 
-**If an installed MDM owns the same HKCU keys or matching system-wide HKLM keys**, registration intentionally
-fails instead of hijacking the installed copy. It does not remove an existing
-installation or switch browsers behind your back. Use the installed version's
-browser integration or explicitly unregister that version using its own
-uninstaller after backing up user data. Never delete broad registry trees.
+- Browser registration journals and manifests: `data/Integration/browser-registration.json`, `com.misterdownloadmanager.host.json`, `com.misterdownloadmanager.host.firefox.json`.
+- Autostart journal: `data/Integration/autostart-ownership.json`.
+- New legacy-cleanup `.reg` backups: `data/Integration/Legacy-Registry-Backups/`.
+- The older standalone cleanup saved backups in `MDM-Legacy-Registry-Backups/` beside the EXE. These previous backups remain untouched by the unified manager. Retain them in case rollback is needed.
 
-**Browser extension:** Install from the Chrome Web Store or Firefox Add-ons.
-The source ZIP also includes `extension/chromium` for Chromium 'Load unpacked'.
-Firefox's `.xpi` in the source package is not necessarily store-signed; use
-addons.mozilla.org for a regular installation.
+Browser registry keys under HKCU are **intentional host integration**, not an application-profile write. No browser extension is installed automatically. A normal installed MDM may own the same host name. The manager refuses registration collisions; it never takes ownership without evidence. The separate legacy-cleanup submenu requires an inventory, recognized old-host path, confirmation and a verified backup before a targeted deletion. Do not remove entries for an installed MDM you still intend to use.
 
-## Native manager (optional)
+## Relocation, update and rollback
 
-Double-click `Mister-Manager.cmd` for Start, graceful Stop, Status, open Data,
-opt-in per-user login autostart and repair. Manager is optional; the application
-works without it. It never forcibly kills an instance, installs services, or
-uses a PortableApps launcher. It controls only processes with the exact same
-running EXE path, protecting any installed MDM running elsewhere.
+1. Exit MDM; make a backup of the entire `data/` directory and any older standalone `.reg` backup folder.
+2. Replace executable/resources/manager files but **not** `data/`.
+3. If you moved folders or drive letters, select browser 2 (Repair) to update journal-owned native host paths and autostart 4 (Repair) if you had enabled per-user startup. Do not change unrelated registry values.
+4. Test the extension and MDM settings. For downgrades, restore the matching prior `data/` backup if a schema change occurred.
 
-Autostart, when explicitly chosen, uses its own HKCU Run value named
-`MisterDownloadManager_NativePortable_Builder`. An ownership record is saved to
-`data/Integration/autostart-ownership.json`. After a folder move, select
-Repair autostart. Disable it before deleting the folder. It never overwrites
-an existing unowned same-name value.
+The launcher avoids passing a path argument ending in backslash (`%~dp0`) into PowerShell and locates its own script from `$PSCommandPath`, following the fixed working b1r2 strategy. Run normally (non-admin) for HKCU; use administrator rights only if you explicitly authorize cleaning old HKLM registrations. Be aware that elevating using another account changes which account's HKCU is accessed.
 
-## Data and upgrades
+## What remains outside the portable folder
 
-- The application-controlled core data root is **`data/`** beside the EXE,
-  including logs, torrent state, themes, downloaded helper programs and site
-  login information. Browser integration ownership journals are there too.
-- The DEFAULT saved download destination may still be the Windows Downloads
-  folder. Set MDM Options → Save To if you want downloaded files beside the EXE.
-- Login secrets may be encrypted for the current Windows account; when moving
-  to another PC/account, sign in again. Do not disable OS credential protections.
-- Upgrades: quit app using Tasks → Exit or the optional Manager; back up all of
-  `data/` and any downloaded files; extract new version into a NEW folder;
-  copy existing `data/` into it without overwriting newer user files. To
-  keep the exact same folder, replace the EXEs/resources and integration scripts
-  without replacing `data/`. Browser registration path stays valid if folder
-  path is unchanged.
-- After moving folder or changing drive, repair browser integration and optional
-  startup registrations. Previously saved absolute download destinations may
-  need adjustment; **no arbitrary path rewriting is performed**.
-- Rollback: exit, back up current `data/`, restore older app binaries to a
-  separate folder and use a compatible `data` backup. Database schema changes
-  may make downgrades unsafe; do not blindly mix schemas.
-- Upstream integrated app updater may be unsuitable for an unofficial source
-  build; inspect update behavior manually before accepting an update.
-
-## Limits
-
-Opt-in browser integration writes intentional HKCU registry keys. Windows shell,
-Defender/SmartScreen, browser extensions and Windows network stacks create their
-own normal caches/logs. The portable build is unsigned unless separately signed
-by its builder. The native folder cannot be moved while the app is running.
-
-Windows 10/11 x64. No forced elevation. No installers, drivers, services, or
-PortableApps metadata. Runtime behavior still needs real Windows testing.
+Windows and browsers may keep OS-managed caches/history. Authorized native messaging registry entries, optional per-user startup and store-installed extensions remain on the host by design. Direct startup does not require those optional integrations. Browser/notification behavior and Windows app runtime portability require manual testing.

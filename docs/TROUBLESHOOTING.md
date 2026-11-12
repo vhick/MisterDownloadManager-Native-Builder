@@ -1,55 +1,52 @@
-# Troubleshooting (beginner-friendly)
+# Troubleshooting — Unified NATIVE Manager b1r4
 
-## Existing official portable copy: browser extension says disconnected
+## Manager fails to open
 
-1. Confirm `misterdownloadmanager.exe`, `misterdownloadmanager-nmhost.exe` and **`data/`** are in the same folder.
-2. Copy `BrowserIntegration.ps1` and `Mister-Browser-Integration.cmd` beside them, double-click CMD, choose **2** (Status).
-3. If the console reports an unowned key or an HKLM system-wide collision, an installed MDM (or a previous registration) may already control browser integration. **Do not delete the key manually.** Use the installed application's own uninstall/unregister flow after making backups, or keep using that copy.
-4. If no collisions, choose **1** to register. This creates intentional HKCU native messaging entries and local JSON manifests. Restart browser completely.
-5. Install/enable the official MDM extension in the browser. If using unpacked extension, only the exact built-in ID is authorized by the host. In Firefox use the store-signed add-on.
-6. Run the MDM GUI once, and test context-menu Download with MDM and a normal eligible download. Check app Options for any disabled capture rules.
-7. If portable folder was relocated, copy the whole folder including `data`, rerun option **1** to repair owned absolute paths. If `data/Integration` was deleted, ownership evidence is lost: the script deliberately refuses to overwrite or remove existing registry entries.
-8. To remove only this integration, choose **3** then type `REMOVE`. Manually confirm keys are absent with option **2**. Registry parent keys remain as Windows state.
+Check `Manager.ps1` and `Mister-Manager.cmd` are **both** beside `misterdownloadmanager.exe` and `misterdownloadmanager-nmhost.exe`, not inside an extra nested directory. The CMD file does not pass `%~dp0` as a PowerShell argument, so it avoids the b1r1/b1r2 trailing-backslash `GetFullPath` and `Illegal characters in path` startup errors. Do not use the older browser/legacy CMD files for this build.
 
-### What the console does not do
+## Browser extension disconnected
 
-It does not inject into browsers, bypass browser security, overwrite other native messaging registrations, modify HKLM, create firewall exceptions or install extensions silently. Browser extension communication is still a **manual acceptance test**.
+1. Run `Mister-Manager.cmd` → main **4** → browser **1** (read-only scan).
+2. Check if a previous normal installation owns any HKCU or HKLM registration. The manager does not overwrite it.
+3. If the normal installation is no longer needed, uninstall it through Windows Settings and retain your download data. Scan again. Browser submenu **4** can remove only verified old current-user registrations after backup and confirmation. Submenu **5** is only for deliberate, authorized old system-wide cleanup (administrator required); check no other Windows user still needs it.
+4. After old registrations are absent, browser submenu **2** registers the portable host. Close/reopen Chrome, Chromium, Edge, Brave or Firefox and test the **official** MDM browser extension.
+5. If the portable folder moved, use browser submenu **2** to repair journal-owned paths, then restart browsers. Do not delete the ownership journal.
 
-## b1r1 console error: "GetFullPath" / "The path is not of a legal form"
+## “No ownership journal”
 
-This came from the original b1r1 consoles evaluating `$PSScriptRoot` as a
-parameter default before PowerShell had populated it. Both `.ps1` scripts and
-both `.cmd` launchers were corrected in **b1r2**. Replace only these four files
-beside MDM's two `.exe` binaries; **do not delete or replace `data/`**.
+This message comes only from the *portable-only unregister* function. It intentionally refuses to remove keys not previously registered by this script. To clean *verified old-installation* keys, use the distinct legacy scan/removal functions in the **same browser submenu**. The old legacy cleaner b1r2 was reported working; its registry safeguards remain but live b1r4 integration testing is still pending.
 
-With the b1r2 CMD launchers, `-AppRoot` points explicitly to the console's
-folder even when the parent folder contains spaces or is on a movable drive.
-The PowerShell scripts also resolve their own location when run without a
-specified `-AppRoot`. This change only fixes startup; it does not, by itself,
-prove that browser integration is working. Existing installed-app native
-messaging entries are still protected.
+## Browser registration says “Existing key belongs to another installation”
+
+This is an ownership conflict. Do not delete the key without inspecting its manifest path and whether an installed MDM still needs it. Browser submenu **1** lists paths and classifies potential legacy entries. The portable register option never hijacks another application's keys.
+
+## What “Clean verified OLD” does
+
+- Only exact MDM native-host keys for the five supported browser families are candidates.
+- Entries are skipped if they look like portable registrations, contain unexpected values/subkeys, have an unrecognized manifest name or cannot be verified.
+- Removal requires literal confirmation: `REMOVE LEGACY` for HKCU or `REMOVE SYSTEM LEGACY` for HKLM.
+- The application must not be running. Backups are exported as `.reg`, verified, SHA-256-indexed, and stored under `data/Integration/Legacy-Registry-Backups/` *before* key removal.
+- The older standalone b1r2 backup directory `MDM-Legacy-Registry-Backups/` remains untouched. Retain it for restoration.
+- It never removes download files, settings, browser extensions, native application binaries or unrelated keys.
+
+## Manager Start, Stop or autostart issues
+
+- The manager identifies a running process by its full EXE path so it should not target another installed copy with the same process name.
+- Stop asks the application to exit using `/exit`, without forced termination. If MDM does not exit, use its tray menu and save downloads before troubleshooting.
+- Startup is **off by default**. Main **5** → **2** enables one journal-owned HKCU Run entry after confirmation; **3** disables it; **4** repairs that specific entry after a folder move. Existing or modified entries are protected.
+- Running CMD as a *different* administrator account accesses that account's HKCU, not your normal browser profile.
 
 ## Build errors
 
-- **Release resolver HTTP 401/403/429:** authenticated API permission/rate-limit failure. Check Actions token/repository settings; retry rather than compiling the wrong branch.
-- **No stable release:** the upstream may have only prereleases or an explicit version wasn't published. Do not silently use main.
-- **Publisher tag/interface mismatch:** pinned v1.1.1 tag or action inputs changed unexpectedly. Inspect the action repository before updating any immutable SHA.
-- **Adapter source drift:** new upstream version changed `crates/ipc/src/lib.rs` or the browser extension IDs. Reaudit source. Do not make a broad text replacement or bypass the guard.
-- **Cargo lock dependency resolution:** source release may have dependency/MSVC compatibility issues. Check `cargo fetch --locked`, rustc and cargo error output; do not remove `--locked` to force an unreviewed dependency upgrade.
-- **Rust Windows build error:** inspect exact failing crate and diagnostics; this kit was **not compiled in Windows during its creation**.
-- **Missing EXE or extensions:** source compilation/official extension pack was incomplete; packaging intentionally refuses placeholders or repacked unrelated binaries.
-- **Publisher dry-run fails:** required output files were missing/invalid or action interface no longer matches; do not force real publish.
-- **Duplicate release exists:** same source/version/revision tag is already managed by publisher. Increase revision only if something changed; unrelated/manual tag conflicts are refused.
+- GitHub API HTTP 401/403/429: authentication, permissions or rate-limit issue; the resolver must not silently fall back to main.
+- No stable release: no matching published semver release. Check the version selected in Run workflow.
+- Exact source adapter mismatch: upstream changed `crates/ipc/src/lib.rs`; source patch intentionally refuses to guess. Audit the new source version before updating it.
+- PowerShell 5.1 parse/SelfTest/read-only scan fails: fix the integrated script before building/publishing.
+- Rust build fails: inspect `cargo fetch --locked`, MSVC dependencies and compiler output. Do not force unlocked compilation.
+- Package validation fails: real x64 binaries, source identity, extension assets, and exactly one unified manager are required.
+- Publisher validation fails: check verified immutable v1.1.1 action, asset identity and dry-run. Do not replace tags blindly.
+- Duplicate managed release: the existing managed release has already published matching upstream tag/revision. Increase revision only for an intentional new builder change.
 
-## Runtime errors
+## Upgrade and rollback
 
-- **Settings written in AppData unexpectedly:** ensure the `data/` folder exists next to the running EXE and `MDM_DATA_DIR` isn't explicitly set to another path. For an official upstream release, a read-only `data` directory may cause fallback; this builder patches that behavior to fail instead. Inspect `data/` permissions.
-- **Settings lost after move:** copy entire `data/` including hidden files and browser ownership journals; avoid mixing different Windows-account encrypted logins.
-- **Manager Stop does not close:** the script only sends upstream `/exit`, no forced process kill. Quit using the tray Exit menu if necessary. Save state before testing.
-- **Autostart works for installed copy instead:** console owns only value `MisterDownloadManager_NativePortable_Builder`. It refuses another owner's value and controls only the exact portable EXE process.
-- **SmartScreen or antivirus prompt:** locally compiled unsigned programs may be flagged; inspect provenance and SHA-256. Do not disable security protection system-wide.
-- **Portable updater/uninstaller wants privileges:** stop; the builder has no installer and no guarantee the upstream updater supports unofficial native builds. Use manual upgrades with `data/` backup.
-
-## Upgrade/rollback safety
-
-Exit first; back up `data/` and downloaded files. Extract the new release into a separate folder and move a copy of `data/` to it; leave original untouched until tested. If it works, retire the older binaries. If the folder path changes, repair owned browser and startup registrations with their console options. If you must roll back after a data-schema migration, restore **matching old `data` backup**; simply replacing EXEs may corrupt newer data. Never run old and new copies against the same `data` folder simultaneously.
+Stop MDM completely. Back up the full `data/` directory and old standalone `.reg` backups. Replace the program files and unified console files, **never** the existing `data/` tree or owner journals. If you downgrade across data-schema changes, restore a matching older data backup. Re-register/repair the portable host after a folder move only if journal ownership is preserved. Unsigned binaries may show normal Windows security warnings; do not disable system security tools.

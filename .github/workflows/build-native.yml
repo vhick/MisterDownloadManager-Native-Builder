@@ -11,7 +11,7 @@ on:
       revision:
         description: 'Builder/package revision; increment after changing build logic'
         required: true
-        default: 'b1r2'
+        default: 'b1r4'
         type: string
       publish:
         description: 'Publish ZIP as a release after independent validation'
@@ -48,6 +48,20 @@ jobs:
           python --version
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Builder static tests failed' }
+
+      - name: PowerShell 5.1 unified manager syntax and read-only smoke test
+        run: |
+          $source = (Resolve-Path 'portable_integration/Manager.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
+          if (@($errors).Count -gt 0) { throw ('PowerShell 5.1 parse errors: ' + ($errors | Out-String)) }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -Action SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'Unified manager self-test failed' }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -Action LegacyScan
+          if ($LASTEXITCODE -ne 0) { throw 'Read-only registry inventory failed' }
+          Write-Host 'PowerShell 5.1 parser, manager loading, and read-only registry scan passed.'
+          Write-Host 'No browser registration, registry cleanup, GUI, or autostart was tested.'
 
       - name: Verify release publisher v1.1.1 action interface and immutable commit
         run: |
@@ -130,20 +144,22 @@ jobs:
         run: |
           $zips = @(Get-ChildItem dist -Filter '*-NativePortable-*.zip' -File | Where-Object { $_.Name -notlike '*-SOURCE-*' })
           if ($zips.Count -ne 1) { throw 'Expected exactly one application NATIVE ZIP' }
-          $sourceZips = @(Get-ChildItem dist -Filter '*-NativePortable-SOURCE-*.zip' -File)
-          if ($sourceZips.Count -ne 1) { throw 'Expected corresponding-source ZIP for GPL distribution' }
+          $sourceZips = @(Get-ChildItem dist -Filter '*-NativePortable-SOURCE-PATCH-*.zip' -File)
+          if ($sourceZips.Count -ne 1) { throw 'Expected compact source PATCH ZIP for GPL distribution' }
           python scripts/validate_native.py --zip "$($zips[0].FullName)"
           if ($LASTEXITCODE -ne 0) { throw 'NATIVE ZIP validation failed' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $sourceArchive = [System.IO.Compression.ZipFile]::OpenRead($sourceZips[0].FullName)
           try {
             $names = @($sourceArchive.Entries | ForEach-Object { $_.FullName })
-            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/upstream/Cargo.lock')) { throw 'Source ZIP missing Cargo.lock' }
-            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/upstream/crates/ipc/src/lib.rs')) { throw 'Source ZIP missing patched Rust source' }
-            if (-not ($names -contains 'MisterDownloadManager-Modified-Source/builder/scripts/apply_adapter.py')) { throw 'Source ZIP missing source adapter' }
+            if (-not ($names -contains 'MisterDownloadManager-Source-Patch/Cargo.lock')) { throw 'Source ZIP missing Cargo.lock' }
+            if (-not ($names -contains 'MisterDownloadManager-Source-Patch/patched/crates/ipc/src/lib.rs')) { throw 'Source ZIP missing patched Rust source' }
+            if (-not ($names -contains 'MisterDownloadManager-Source-Patch/builder/scripts/apply_adapter.py')) { throw 'Source patch ZIP missing source adapter' }
+            if (-not ($names -contains 'MisterDownloadManager-Source-Patch/PORTABILITY.patch')) { throw 'Missing storage patch' }
+            if (-not ($names -contains 'MisterDownloadManager-Source-Patch/UPSTREAM-SOURCE.txt')) { throw 'Missing full source access directions' }
           } finally { $sourceArchive.Dispose() }
           Write-Host "Validated application SHA-256: $((Get-FileHash $zips[0].FullName -Algorithm SHA256).Hash.ToLower())"
-          Write-Host "Validated source SHA-256: $((Get-FileHash $sourceZips[0].FullName -Algorithm SHA256).Hash.ToLower())"
+          Write-Host "Validated source patch SHA-256: $((Get-FileHash $sourceZips[0].FullName -Algorithm SHA256).Hash.ToLower())"
 
       - name: Shared Release Publisher DRY RUN - required first
         if: steps.existing.outputs.exists != 'true'

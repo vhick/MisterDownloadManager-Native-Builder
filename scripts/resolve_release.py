@@ -23,7 +23,7 @@ def stable_key(tag):
 def fetch_json(url):
     req = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
-        "User-Agent": "mdm-native-builder-b1r2",
+        "User-Agent": "mdm-native-builder-b1r4",
         "X-GitHub-Api-Version": "2022-11-28",
         **({"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"} if os.environ.get("GITHUB_TOKEN") else {}),
     })
@@ -86,11 +86,11 @@ def resolve_tag_sha(tag):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", default="latest")
-    parser.add_argument("--revision", default="b1r2")
+    parser.add_argument("--revision", default="b1r4")
     parser.add_argument("--out", default="build-identity.json")
     args = parser.parse_args()
     if not re.fullmatch(r"b\d+r\d+(?:[._-][a-zA-Z0-9]+)?", args.revision):
-        raise ValueError("Revision must be like b1r2")
+        raise ValueError("Revision must be like b1r4")
     release = query_releases(args.version)
     tag = release["tag_name"]
     sha = resolve_tag_sha(tag)

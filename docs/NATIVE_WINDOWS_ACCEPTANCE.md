@@ -29,7 +29,7 @@ are insufficient for a claim of actual runtime portability.
 
 - [ ] Record a pre-registration HKCU snapshot (five host keys).
 - [ ] If any key is held by an installed app, Register refuses without overwrite.
-- [ ] With keys unoccupied, run `Mister-Browser-Integration.cmd` -> 1.
+- [ ] With keys unoccupied, run `Mister-Manager.cmd` -> main 4 -> browser 2.
 - [ ] Verify exact host JSON path and allowed extension IDs (unpacked/store/Firefox).
 - [ ] Restart Chrome, Edge, Brave, Firefox. Use official extension from store.
 - [ ] Verify extension connects and browser hands MDM an example test download.
@@ -42,7 +42,7 @@ are insufficient for a claim of actual runtime portability.
 - [ ] Kill the console during registration and retry; journal supports recovery.
 - [ ] Ensure other browser extensions, existing applications, HKLM keys untouched.
 
-## Optional Manager
+## Optional unified Manager (b1r3)
 
 - [ ] Start/status/stop: only current native-folder instance is targeted.
 - [ ] Graceful `/exit` saves queue; never terminates unrelated installed copy.
@@ -65,3 +65,16 @@ are insufficient for a claim of actual runtime portability.
 
 Date, Windows edition, browser versions, upstream tag/commit, builder revision,
 ZIP SHA-256, tested path and evidence location must be recorded by the operator.
+
+## Unified browser/legacy cleanup menu b1r3
+
+- [ ] Single `Mister-Manager.cmd` opens; only `Manager.ps1` is needed; test from another current working directory and from a Unicode/spaces folder.
+- [ ] Main menu 4 -> browser submenu 1 performs a read-only scan. Confirm five known MDM registry families and both HKCU/HKLM registry views are shown accurately.
+- [ ] Browser 4 cleans only verified old HKCU keys, after literal `REMOVE LEGACY`, and stores SHA-256-indexed `.reg` backups under `data/Integration/Legacy-Registry-Backups/`.
+- [ ] Browser 5 refuses without administrative access; if explicitly authorized, cleans verified old HKLM keys only after literal `REMOVE SYSTEM LEGACY` and backups.
+- [ ] Change a key between inventory and deletion; it must be preserved. Add an extra value/subkey to a test key: must be skipped, not recursively deleted.
+- [ ] Previously portable-registered keys and `data/Integration/` manifests must NEVER be offered for legacy cleanup.
+- [ ] Existing older `MDM-Legacy-Registry-Backups/` stays untouched.
+- [ ] Browser 2 registration and 3 journal-owned unregister still work after moving from the old b1r2 two-console layout.
+- [ ] Startup remains strictly opt-in and only touches its own HKCU Run entry.
+- [ ] Browser works after restart with the installed official extension and test download (manual, interactive acceptance).

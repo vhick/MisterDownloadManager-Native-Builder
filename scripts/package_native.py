@@ -17,6 +17,9 @@ BINARIES = (
     "misterdownloadmanager-mcp.exe",
 )
 ROOT_NAME = "MisterDownloadManager-NativePortable"
+PATCH_ROOT = "MisterDownloadManager-Source-Patch"
+SOURCE_REPO = "https://github.com/anefzaoui/misterdownloadmanager"
+MAX_PATCH_ARCHIVE_BYTES = 20 * 1024 * 1024
 
 
 def sha256(path):
@@ -87,14 +90,13 @@ def main():
     shutil.copytree(pack / 'chromium', stage / 'extension/chromium')
     (stage / 'extension').mkdir(exist_ok=True)
     shutil.copy2(firefox, stage / 'extension/mdm-firefox.xpi')
-    for name in ('BrowserIntegration.ps1', 'Mister-Browser-Integration.cmd'):
-        shutil.copy2(here / 'portable_integration' / name, stage / name)
     shutil.copy2(here / 'portable_integration/Manager.ps1', stage / 'Manager.ps1')
     shutil.copy2(here / 'portable_integration/Mister-Manager.cmd', stage / 'Mister-Manager.cmd')
     (stage / 'data').mkdir()
     (stage / 'data/README.txt').write_text(
         'This folder is the NATIVE application data root. NEVER delete it on upgrade.\n'
-        'Optional browser-registration ownership records are in data/Integration/.\n'
+        'Optional browser/auto-start ownership journals are in data/Integration/.\n'
+        'New legacy browser registry backups are in data/Integration/Legacy-Registry-Backups/.\n'
         'Do not run the application from a read-only location.\n', encoding='utf-8')
     shutil.copy2(here / 'docs/NATIVE_WINDOWS_ACCEPTANCE.md', stage / 'WINDOWS_ACCEPTANCE.txt')
     shutil.copy2(here / 'docs/PORTABLE_USAGE.md', stage / 'PORTABLE_USAGE.txt')
@@ -105,7 +107,7 @@ def main():
     identity['github_run_id'] = os.getenv('GITHUB_RUN_ID', 'unknown')
     identity['source_adapter'] = 'scripts/apply_adapter.py fail-closed storage selection'
     identity['source_adapter_sha256'] = sha256(here / 'scripts/apply_adapter.py')
-    identity['browser_console_sha256'] = sha256(here / 'portable_integration/BrowserIntegration.ps1')
+    identity['unified_manager_sha256'] = sha256(here / 'portable_integration/Manager.ps1')
     identity['unmodified_upstream_commit'] = actual_sha
     identity['binary_sha256'] = {name: sha256(stage / name) for name in BINARIES}
     (stage / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2) + '\n', encoding='utf-8')
@@ -113,43 +115,83 @@ def main():
     zip_path = out / zip_name
     if zip_path.exists():
         zip_path.unlink()
-    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=7,
-                         allowZip64=True) as archive:
-        # Record actual files, with names that are portable across ZIP readers.
-        for path in sorted(stage.rglob('*')):
-            if path.is_symlink():
-                raise RuntimeError(f'Unexpected symlink in package staging: {path}')
-            if path.is_file():
-                archive.write(path, f'{ROOT_NAME}/{path.relative_to(stage).as_posix()}')
-    # GPL corresponding source: the exact upstream checkout AS PATCHED, including Cargo.lock.
-    # Keep source out of the executable ZIP; publish a separate source ZIP next to it.
-    source_name = f'MisterDownloadManager-{version}-NativePortable-SOURCE-{identity["builder_revision"]}.zip'
+    # GPL-3.0 source availability: publish an exact commit URL and our modified
+    # source as a small patch instead of recursively archiving the entire CI
+    # working tree (which can include enormous generated/untracked resources).
+    source_name = f'MisterDownloadManager-{version}-NativePortable-SOURCE-PATCH-{identity["builder_revision"]}.zip'
     source_zip = out / source_name
     if source_zip.exists():
         source_zip.unlink()
-    source_root = 'MisterDownloadManager-Modified-Source'
-    with zipfile.ZipFile(source_zip, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6,
-                         allowZip64=True) as archive:
-        for source_file in sorted(checkout.rglob('*')):
-            rel = source_file.relative_to(checkout)
-            if any(component in ('.git', 'target') for component in rel.parts):
-                continue
-            if source_file.is_symlink():
-                raise RuntimeError(f'Unsafe source symlink cannot be redistributed blindly: {rel}')
-            if source_file.is_file():
-                archive.write(source_file, f'{source_root}/upstream/{rel.as_posix()}')
+    changed_paths = subprocess.check_output(
+        ['git', '-C', str(checkout), 'diff', '--name-only', 'HEAD', '--'],
+        text=True, encoding='utf-8').splitlines()
+    expected_path = 'crates/ipc/src/lib.rs'
+    if changed_paths != [expected_path]:
+        raise RuntimeError(f'Unexpected modified upstream files: {changed_paths}; only the audited storage patch is allowed')
+    patch = subprocess.check_output(
+        ['git', '-C', str(checkout), 'diff', '--binary', 'HEAD', '--', expected_path])
+    if not patch.startswith(b'diff --git a/crates/ipc/src/lib.rs b/crates/ipc/src/lib.rs'):
+        raise RuntimeError('The expected exact source patch was not generated')
+    if len(patch) > 2 * 1024 * 1024:
+        raise RuntimeError('Source patch unexpectedly exceeds 2 MiB')
+    patch_sha = hashlib.sha256(patch).hexdigest()
+    identity['source_patch_sha256'] = patch_sha
+    identity['source_repository'] = SOURCE_REPO
+    identity['source_archive_url'] = f'{SOURCE_REPO}/archive/{actual_sha}.zip'
+    identity['source_distribution'] = 'Exact upstream source by commit URL + this published modified-source patch and builder'
+    (stage / 'BUILD-IDENTITY.json').write_text(json.dumps(identity, indent=2) + '\n', encoding='utf-8')
+    source_access = (f'Mister Download Manager modified corresponding-source access\n'
+        f'Upstream: {SOURCE_REPO}\nTag: {identity["upstream_tag"]}\n'
+        f'Exact commit: {actual_sha}\nSource archive: {SOURCE_REPO}/archive/{actual_sha}.zip\n'
+        f'Applied source patch: {source_name} (PORTABILITY.patch)\n'
+        f'Patch SHA-256: {patch_sha}\n'
+        f'Builder revision: {identity["builder_revision"]}\n'
+        'The runnable application ZIP intentionally contains no Rust checkout.\n'
+        'To reconstruct the full modified source, obtain the exact upstream commit,\n'
+        'then apply PORTABILITY.patch with git apply. The patch ZIP also includes\n'
+        'Cargo.lock, the changed Rust source file, and build scripts.\n'
+        'GPL-3.0-or-later: anyone distributing these binaries is responsible for\n'
+        'ensuring that the complete Corresponding Source remains freely obtainable.\n'
+        'If the upstream source link stops working, the distributor must provide\n'
+        'equivalent complete source access; a patch alone is not sufficient.\n')
+    (stage / 'SOURCE-ACCESS.txt').write_text(source_access, encoding='utf-8')
+    # Create the application ZIP once, after build identity and source directions are final.
+    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED,
+                         compresslevel=7, allowZip64=True) as archive:
+        for path in sorted(stage.rglob('*')):
+            if path.is_symlink():
+                raise RuntimeError(f'Unexpected symlink in staging: {path}')
+            if path.is_file():
+                archive.write(path, f'{ROOT_NAME}/{path.relative_to(stage).as_posix()}')
+    with zipfile.ZipFile(source_zip, 'w', compression=zipfile.ZIP_DEFLATED,
+                         compresslevel=7, allowZip64=True) as archive:
+        archive.writestr(f'{PATCH_ROOT}/PORTABILITY.patch', patch)
+        archive.writestr(f'{PATCH_ROOT}/UPSTREAM-SOURCE.txt', source_access)
+        archive.writestr(f'{PATCH_ROOT}/BUILD-IDENTITY.json', json.dumps(identity, indent=2) + '\n')
+        archive.write(checkout / 'Cargo.lock', f'{PATCH_ROOT}/Cargo.lock')
+        archive.write(checkout / expected_path, f'{PATCH_ROOT}/patched/{expected_path}')
         for local_file in sorted(here.rglob('*')):
             rel = local_file.relative_to(here)
-            if (any(component in ('__pycache__', '.git') for component in rel.parts)
-                    or rel.suffix in ('.pyc', '.zip') or local_file.is_dir()):
+            if local_file.is_dir() or local_file.is_symlink():
                 continue
-            archive.write(local_file, f'{source_root}/builder/{rel.as_posix()}')
-        archive.writestr(f'{source_root}/BUILD-IDENTITY.json', json.dumps(identity, indent=2) + '\n')
+            if any(part in ('__pycache__', '.git') for part in rel.parts):
+                continue
+            if rel.suffix in ('.pyc', '.zip'):
+                continue
+            archive.write(local_file, f'{PATCH_ROOT}/builder/{rel.as_posix()}')
+    if source_zip.stat().st_size > MAX_PATCH_ARCHIVE_BYTES:
+        raise RuntimeError('Source patch bundle unexpectedly large; refusing to publish')
     with zipfile.ZipFile(source_zip) as check:
-        if check.testzip() or f'{source_root}/upstream/Cargo.lock' not in check.namelist():
-            raise RuntimeError('GPL corresponding-source archive failed verification')
+        names = set(check.namelist())
+        required = {f'{PATCH_ROOT}/PORTABILITY.patch',
+                    f'{PATCH_ROOT}/UPSTREAM-SOURCE.txt',
+                    f'{PATCH_ROOT}/Cargo.lock',
+                    f'{PATCH_ROOT}/patched/{expected_path}',
+                    f'{PATCH_ROOT}/builder/scripts/apply_adapter.py'}
+        if check.testzip() or not required.issubset(names):
+            raise RuntimeError('Source patch archive integrity check failed')
     print(f'Created NATIVE ZIP {zip_path} SHA256 {sha256(zip_path)}')
-    print(f'Created GPL modified SOURCE ZIP {source_zip} SHA256 {sha256(source_zip)}')
+    print(f'Created compact SOURCE PATCH ZIP {source_zip} SHA256 {sha256(source_zip)}')
     print(f'Upstream tag {identity["upstream_tag"]}, commit {actual_sha}, lock {identity["cargo_lock_sha256"]}')
 
 

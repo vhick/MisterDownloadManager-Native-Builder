@@ -34,8 +34,7 @@ def validate(path):
         required = [f'{ROOT_NAME}/{name}' for name in BINARIES] + [
             f'{ROOT_NAME}/data/README.txt',
             f'{ROOT_NAME}/BUILD-IDENTITY.json',
-            f'{ROOT_NAME}/BrowserIntegration.ps1',
-            f'{ROOT_NAME}/Mister-Browser-Integration.cmd',
+            f'{ROOT_NAME}/SOURCE-ACCESS.txt',
             f'{ROOT_NAME}/Manager.ps1',
             f'{ROOT_NAME}/Mister-Manager.cmd',
             f'{ROOT_NAME}/LICENSE.txt',
@@ -49,6 +48,11 @@ def validate(path):
         if identity.get('build_mode') != 'NATIVE': raise RuntimeError('Wrong build mode')
         if not identity.get('upstream_sha') or len(identity['upstream_sha']) != 40:
             raise RuntimeError('Missing verified source SHA')
+        if identity.get('source_distribution', '').startswith('Exact upstream source') is False:
+            raise RuntimeError('Missing corresponding-source distribution identity')
+        source_info = z.read(f'{ROOT_NAME}/SOURCE-ACCESS.txt').decode('utf-8')
+        if identity['source_archive_url'] not in source_info or identity['source_patch_sha256'] not in source_info:
+            raise RuntimeError('Corresponding-source link or patch identity missing')
         for name in BINARIES:
             content = z.read(f'{ROOT_NAME}/{name}')
             if not is_x64_pe_bytes(content): raise RuntimeError(f'Invalid x64 PE binary: {name}')
@@ -61,11 +65,20 @@ def validate(path):
         with zipfile.ZipFile(__import__('io').BytesIO(z.read(f'{ROOT_NAME}/extension/mdm-firefox.xpi'))) as xpi:
             if xpi.testzip() or 'manifest.json' not in xpi.namelist():
                 raise RuntimeError('Firefox XPI integrity failed')
-        browser = z.read(f'{ROOT_NAME}/BrowserIntegration.ps1').decode('utf-8')
-        for must in ('HKEY_CURRENT_USER', 'browser-registration.json', 'Get-KeyDefault', 'portable'):
-            if must not in browser: raise RuntimeError(f'Missing registration safety function: {must}')
-        if ('--register' in browser and 'misterdownloadmanager-nmhost.exe --register' in browser):
+        manager = z.read(f'{ROOT_NAME}/Manager.ps1').decode('utf-8')
+        launcher = z.read(f'{ROOT_NAME}/Mister-Manager.cmd').decode('ascii')
+        for must in ('HKEY_CURRENT_USER', 'browser-registration.json', 'Get-KeyDefault',
+                     'Remove-VerifiedLegacy', 'Legacy-Registry-Backups', 'BACKUP-INDEX.json',
+                     'Browser-Menu', 'Startup-Menu', 'Register-Portable', 'Unregister-Portable'):
+            if must not in manager: raise RuntimeError(f'Missing unified manager feature/safeguard: {must}')
+        if 'misterdownloadmanager-nmhost.exe --register' in manager:
             raise RuntimeError('Unsafe upstream portable host registration invoked')
+        if '-AppRoot' in launcher or '-PortableRoot' in launcher:
+            raise RuntimeError('Unsafe CMD root argument; previous Windows 5.1 regression')
+        for legacy in ('BrowserIntegration.ps1', 'Mister-Browser-Integration.cmd',
+                       'MDM-Legacy-Browser-Cleanup.ps1', 'MDM-Legacy-Browser-Cleanup.cmd'):
+            if f'{ROOT_NAME}/{legacy}' in members:
+                raise RuntimeError(f'Duplicate legacy console included: {legacy}')
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     print(f'STATIC-VALIDATED: NATIVE ZIP {path.name} ({path.stat().st_size:,} bytes)')
     print(f'SHA256 {digest}')
