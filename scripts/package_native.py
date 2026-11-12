@@ -20,6 +20,58 @@ ROOT_NAME = "MisterDownloadManager-NativePortable"
 PATCH_ROOT = "MisterDownloadManager-Source-Patch"
 SOURCE_REPO = "https://github.com/anefzaoui/misterdownloadmanager"
 MAX_PATCH_ARCHIVE_BYTES = 20 * 1024 * 1024
+# IMPORTANT: Explicit, versioned allowlist. Never recurse over the builder
+# working directory: GitHub Actions clones upstream/ here, builds upstream/target,
+# and may leave dist/, credentials or other untracked files at its root.
+BUILDER_SOURCE_FILES = (
+    '.github/workflows/build-native.yml',
+    '.gitignore',
+    'LICENSES/BUILD-KIT-LICENSE.txt',
+    'README.md',
+    'docs/GITHUB_DESKTOP_SETUP.md',
+    'docs/NATIVE_WINDOWS_ACCEPTANCE.md',
+    'docs/PORTABLE_USAGE.md',
+    'docs/SOURCE_AUDIT.md',
+    'docs/TROUBLESHOOTING.md',
+    'docs/VALIDATION_EVIDENCE.md',
+    'portable_integration/Manager.ps1',
+    'portable_integration/Mister-Manager.cmd',
+    'scripts/apply_adapter.py',
+    'scripts/check_release.py',
+    'scripts/package_native.py',
+    'scripts/resolve_release.py',
+    'scripts/validate_native.py',
+    'scripts/verify_publisher.py',
+    'tests/test_builder.py',
+)
+# Builder source files are small scripts/docs, not generated build outputs.
+MAX_BUILDER_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def write_builder_sources(archive, builder_root):
+    """Write only known builder sources, never checkout/build/secret files.
+
+    A fixed manifest avoids the previously failing b1r4 `here.rglob('*')`
+    approach that pulled upstream/target into a purported source-patch ZIP.
+    """
+    root = Path(builder_root).resolve()
+    total = 0
+    if len(BUILDER_SOURCE_FILES) != len(set(BUILDER_SOURCE_FILES)):
+        raise RuntimeError('Builder source manifest contains duplicate entries')
+    for rel in BUILDER_SOURCE_FILES:
+        path = root / rel
+        if not path.is_file() or path.is_symlink() or path.resolve().parent != (root / rel).parent.resolve():
+            raise RuntimeError(f'Missing or unsafe required builder source file: {rel}')
+        if not path.resolve().is_relative_to(root):
+            raise RuntimeError(f'Builder source file escapes repository root: {rel}')
+        size = path.stat().st_size
+        if size > MAX_BUILDER_SOURCE_BYTES:
+            raise RuntimeError(f'Unexpectedly large builder source file ({size} bytes): {rel}')
+        total += size
+        if total > MAX_PATCH_ARCHIVE_BYTES:
+            raise RuntimeError('Builder source files unexpectedly exceed patch size cap')
+        archive.write(path, f'{PATCH_ROOT}/builder/{rel}')
+
 
 
 def sha256(path):
@@ -170,15 +222,7 @@ def main():
         archive.writestr(f'{PATCH_ROOT}/BUILD-IDENTITY.json', json.dumps(identity, indent=2) + '\n')
         archive.write(checkout / 'Cargo.lock', f'{PATCH_ROOT}/Cargo.lock')
         archive.write(checkout / expected_path, f'{PATCH_ROOT}/patched/{expected_path}')
-        for local_file in sorted(here.rglob('*')):
-            rel = local_file.relative_to(here)
-            if local_file.is_dir() or local_file.is_symlink():
-                continue
-            if any(part in ('__pycache__', '.git') for part in rel.parts):
-                continue
-            if rel.suffix in ('.pyc', '.zip'):
-                continue
-            archive.write(local_file, f'{PATCH_ROOT}/builder/{rel.as_posix()}')
+        write_builder_sources(archive, here)
     if source_zip.stat().st_size > MAX_PATCH_ARCHIVE_BYTES:
         raise RuntimeError('Source patch bundle unexpectedly large; refusing to publish')
     with zipfile.ZipFile(source_zip) as check:
@@ -188,8 +232,12 @@ def main():
                     f'{PATCH_ROOT}/Cargo.lock',
                     f'{PATCH_ROOT}/patched/{expected_path}',
                     f'{PATCH_ROOT}/builder/scripts/apply_adapter.py'}
-        if check.testzip() or not required.issubset(names):
-            raise RuntimeError('Source patch archive integrity check failed')
+        expected = required | {f'{PATCH_ROOT}/builder/{rel}' for rel in BUILDER_SOURCE_FILES} | {
+            f'{PATCH_ROOT}/BUILD-IDENTITY.json', f'{PATCH_ROOT}/UPSTREAM-SOURCE.txt'}
+        if check.testzip() or names != expected:
+            extra = sorted(names - expected)
+            missing = sorted(expected - names)
+            raise RuntimeError(f'Source patch ZIP content invalid; extra={extra}, missing={missing}')
     print(f'Created NATIVE ZIP {zip_path} SHA256 {sha256(zip_path)}')
     print(f'Created compact SOURCE PATCH ZIP {source_zip} SHA256 {sha256(source_zip)}')
     print(f'Upstream tag {identity["upstream_tag"]}, commit {actual_sha}, lock {identity["cargo_lock_sha256"]}')

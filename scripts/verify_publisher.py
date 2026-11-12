@@ -12,7 +12,7 @@ result=subprocess.run(['git','ls-remote',REMOTE,'refs/tags/v1.1.1','refs/tags/v1
 shas = [row.split()[0].lower() for row in result.stdout.splitlines()]
 if REF not in shas:
     raise RuntimeError('Pinned action tag moved; refusing build')
-request=urllib.request.Request(url,headers={'User-Agent':'mdm-native-builder-b1r4'})
+request=urllib.request.Request(url,headers={'User-Agent':'mdm-native-builder-b1r5'})
 with urllib.request.urlopen(request,timeout=30) as response:
     content=response.read().decode('utf-8')
 for parameter in ('files:','tag:','release-title:','tag-prefix:',

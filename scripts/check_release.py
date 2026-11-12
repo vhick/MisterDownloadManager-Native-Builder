@@ -14,7 +14,7 @@ url = f"https://api.github.com/repos/{repo}/releases/tags/{urllib.parse.quote(id
 request = urllib.request.Request(url, headers={
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'mdm-native-builder-b1r4',
+    'User-Agent': 'mdm-native-builder-b1r5',
     'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
 })
 try:

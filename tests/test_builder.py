@@ -108,7 +108,7 @@ class ArtifactTests(unittest.TestCase):
             (chromium/'manifest.json').write_text('{"name":"Mister Download Manager","manifest_version":3}', encoding='utf-8')
             with zipfile.ZipFile(upstream/'target/extension/mdm-firefox.xpi','w') as z:
                 z.writestr('manifest.json','{"manifest_version":2,"name":"MDM"}')
-            identity = {'version':'0.5.2', 'builder_revision':'b1r4',
+            identity = {'version':'0.5.2', 'builder_revision':'b1r5',
                         'upstream_tag':'v0.5.2', 'upstream_sha':sha, 'build_mode':'NATIVE'}
             id_file = base/'build-identity.json'
             id_file.write_text(json.dumps(identity),encoding='utf-8')
@@ -121,8 +121,8 @@ class ArtifactTests(unittest.TestCase):
                  mock.patch('sys.argv',['package_native.py','--upstream',str(upstream),
                                          '--identity',str(id_file),'--output',str(base/'dist')]):
                 package.main()
-            app = base/'dist/MisterDownloadManager-0.5.2-NativePortable-b1r4.zip'
-            patch = base/'dist/MisterDownloadManager-0.5.2-NativePortable-SOURCE-PATCH-b1r4.zip'
+            app = base/'dist/MisterDownloadManager-0.5.2-NativePortable-b1r5.zip'
+            patch = base/'dist/MisterDownloadManager-0.5.2-NativePortable-SOURCE-PATCH-b1r5.zip'
             self.assertTrue(app.is_file())
             self.assertTrue(patch.is_file())
             self.assertLess(patch.stat().st_size, 200_000)
@@ -132,6 +132,41 @@ class ArtifactTests(unittest.TestCase):
                 self.assertIn('MisterDownloadManager-Source-Patch/UPSTREAM-SOURCE.txt',z.namelist())
                 self.assertIn(sha, z.read('MisterDownloadManager-Source-Patch/UPSTREAM-SOURCE.txt').decode())
             validator.validate(app)
+
+    def test_source_bundle_fixed_manifest_excludes_checkout_build_output_and_secrets(self):
+        # b1r4 regression: the builder directory itself contains upstream/target,
+        # dist/, generated files, and possibly other unrelated untracked content.
+        # Even a >20 MiB file outside the manifest must not enter source ZIP.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel in package.BUILDER_SOURCE_FILES:
+                file = root / rel
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text(f'official builder source: {rel}\n', encoding='utf-8')
+            extra = root/'upstream/target/release/huge-build.bin'
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            with extra.open('wb') as fh:
+                fh.truncate(25 * 1024 * 1024)
+            (root/'dist').mkdir()
+            (root/'dist/old-release.zip').write_bytes(b'a previous release')
+            (root/'.git').mkdir()
+            (root/'.git/config').write_text('sensitive local settings')
+            (root/'local-secrets.env').write_text('SECRET=should-not-leak')
+            out = root/'patched-source.zip'
+            with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+                package.write_builder_sources(z, root)
+            with zipfile.ZipFile(out) as z:
+                actual = set(z.namelist())
+                expected = {f'{package.PATCH_ROOT}/builder/{rel}' for rel in package.BUILDER_SOURCE_FILES}
+                self.assertEqual(actual, expected)
+                self.assertIsNone(z.testzip())
+            self.assertLess(out.stat().st_size, 100_000)
+
+    def test_source_bundle_missing_required_builder_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with zipfile.ZipFile(Path(tmp)/'missing.zip', 'w') as z:
+                with self.assertRaisesRegex(RuntimeError, 'Missing or unsafe required builder'):
+                    package.write_builder_sources(z, tmp)
 
     def test_wrong_mode_zip_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,6 +246,9 @@ class SafetyTests(unittest.TestCase):
     def test_no_unbounded_source_checkout_archive(self):
         pack = (ROOT/'scripts/package_native.py').read_text(encoding='utf-8')
         self.assertNotIn("checkout.rglob('*')", pack)
+        self.assertNotIn("for local_file in sorted(here.rglob", pack)
+        self.assertIn('BUILDER_SOURCE_FILES', pack)
+        self.assertIn('write_builder_sources(archive, here)', pack)
         self.assertIn("'git', '-C', str(checkout), 'diff', '--binary'", pack)
         self.assertIn('MAX_PATCH_ARCHIVE_BYTES', pack)
         self.assertIn('SOURCE-ACCESS.txt', pack)

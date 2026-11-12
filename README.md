@@ -1,4 +1,4 @@
-# Mister Download Manager — NATIVE portable builder b1r4
+# Mister Download Manager — NATIVE portable builder b1r5
 
 **Unofficial, independent GitHub Actions source builder and a single optional Windows manager.** Not an upstream fork and not an official installer.
 
@@ -67,13 +67,13 @@ docs/                                    Setup, source audit, acceptance, data s
 
 The NATIVE pipeline resolves the actual upstream stable tag and SHA, refuses unverified main or prerelease, checks for duplicate managed releases, verifies pinned publisher inputs, checks out source, applies the exact fail-closed data adapter, builds Windows x64 Rust binaries, packages the upstream browser extension resources, and independently validates the NATIVE ZIP and the GPL source patch ZIP. The publisher dry-run is mandatory before publication. No upstream fork, local compiler, paid runner or installer is required.
 
-**b1r4 addition:** Windows PowerShell 5.1 parses the combined `Manager.ps1`, runs a non-mutating `SelfTest`, and performs a read-only native-messaging registry scan on the hosted Windows runner. This checks console initialization but does not simulate interactive Explorer, browser extensions, actual registration, autostart, or GUI behavior.
+**b1r5 addition:** Windows PowerShell 5.1 parses the combined `Manager.ps1`, runs a non-mutating `SelfTest`, and performs a read-only native-messaging registry scan on the hosted Windows runner. This checks console initialization but does not simulate interactive Explorer, browser extensions, actual registration, autostart, or GUI behavior.
 
 Outputs after a *successful* hosted build:
 
 ```text
-MisterDownloadManager-<version>-NativePortable-b1r4.zip
-MisterDownloadManager-<version>-NativePortable-SOURCE-PATCH-b1r4.zip
+MisterDownloadManager-<version>-NativePortable-b1r5.zip
+MisterDownloadManager-<version>-NativePortable-SOURCE-PATCH-b1r5.zip
 SHA256SUMS.txt
 ```
 
@@ -90,13 +90,35 @@ The application ZIP contains actual source-built binaries, the only two manager 
 ## Limitations and verification
 
 - Python regression tests cover semver resolution, PE validation, correct NATIVE-only structure, a single console and registry safety guards.
-- Full Windows Rust compilation, interactive browser-extension communication, real Windows registry cleanup with this **new combined** manager and release publishing **have not been executed in this environment**. The user previously confirmed the standalone b1r2 legacy cleanup works, but this does not prove the b1r4 integration has been runtime-verified.
+- The user-provided b1r4 Actions run **successfully compiled** Windows Rust MDM and built extensions but failed source ZIP packaging; **b1r5 still needs its own CI run**. Interactive browser-extension communication, real Windows registry cleanup with the combined manager, and b1r5 publication remain unverified. The user previously confirmed the standalone b1r2 legacy cleanup works, but this does not prove the b1r5 integration has been runtime-verified.
 - The upstream data-path patch is source-specific. If newer upstream versions change the exact Rust code, the build should **fail closed** until the adapter is reviewed.
 - Do not use this package to remove applications, downloads, browser extensions, unrelated keys or files. Manual Windows acceptance and installed-app coexistence tests remain necessary.
 
 Read `docs/GITHUB_DESKTOP_SETUP.md`, `docs/PORTABLE_USAGE.md`, `docs/TROUBLESHOOTING.md`, `docs/SOURCE_AUDIT.md`, and `docs/NATIVE_WINDOWS_ACCEPTANCE.md` before distributing.
 
 
-## What changes in b1r4: compact source publication
+## What changes in b1r5: compact source publication
 
-The previous b1r2 release showed an 18.5 MB application ZIP and a separate 934 MB SOURCE ZIP. The SOURCE ZIP resulted from archiving the entire upstream build checkout, not from app files. **b1r4 removes that archive step.** Builds are still compiled from verified upstream Rust source; the runtime ZIP contains only compiled binaries, extension resources, manager and empty `data/`. The second release ZIP is a deliberately compact `SOURCE-PATCH` bundle containing `PORTABILITY.patch`, patched Rust source, Cargo.lock, builder scripts and instructions to fetch the full exact upstream commit. It is not the full source tree. Complete Corresponding Source must remain available under the GPL, and distributors must arrange equivalent access if the upstream source link ceases to work. The source patch ZIP has a 20 MiB maximum-size safeguard; a source tree is never recursively packed into a release asset.
+The previous b1r2 release showed an 18.5 MB application ZIP and a separate 934 MB SOURCE ZIP. The SOURCE ZIP resulted from archiving the entire upstream build checkout, not from app files. **b1r5 removes that archive step.** Builds are still compiled from verified upstream Rust source; the runtime ZIP contains only compiled binaries, extension resources, manager and empty `data/`. The second release ZIP is a deliberately compact `SOURCE-PATCH` bundle containing `PORTABILITY.patch`, patched Rust source, Cargo.lock, builder scripts and instructions to fetch the full exact upstream commit. It is not the full source tree. Complete Corresponding Source must remain available under the GPL, and distributors must arrange equivalent access if the upstream source link ceases to work. The source patch ZIP has a 20 MiB maximum-size safeguard; a source tree is never recursively packed into a release asset.
+
+## b1r5 fix — source patch ZIP builder-root recursion (Nov 12, 2026)
+
+The real b1r4 Windows run compiled the MDM executables successfully but failed
+at `scripts/package_native.py` while building the compact source ZIP. The
+source packager accidentally scanned all files under the builder checkout, which
+included the freshly cloned `upstream/`, compiled `upstream/target/`, and
+untracked CI output. Its 20 MiB source-archive safeguard correctly stopped
+publication but the recursive inclusion was a packaging defect.
+
+b1r5 replaces that recursion with an **exact explicit manifest of 19 builder
+source files**. No `upstream/`, `dist/`, `target/`, `.git/`, cache, or unknown
+local file can enter the source-patch ZIP. The 20 MiB archive limit remains.
+Two new regression tests create 25 MiB of synthetic Rust build output and
+untracked/secret files adjacent to the builder and verify they are excluded.
+The main application ZIP contents, Rust source adapter, and unified manager
+are unchanged from b1r4. No need to rebuild or modify your existing portable
+MDM installation. Run a new GitHub Actions dispatch with revision `b1r5`.
+
+**GPL reminder:** The SOURCE-PATCH asset is not a complete source checkout.
+Distribution requires continued access to the exact upstream source and all
+corresponding source/build materials, not only the patch. See `SOURCE-ACCESS.txt`.

@@ -11,7 +11,7 @@ on:
       revision:
         description: 'Builder/package revision; increment after changing build logic'
         required: true
-        default: 'b1r4'
+        default: 'b1r5'
         type: string
       publish:
         description: 'Publish ZIP as a release after independent validation'
@@ -157,6 +157,12 @@ jobs:
             if (-not ($names -contains 'MisterDownloadManager-Source-Patch/builder/scripts/apply_adapter.py')) { throw 'Source patch ZIP missing source adapter' }
             if (-not ($names -contains 'MisterDownloadManager-Source-Patch/PORTABILITY.patch')) { throw 'Missing storage patch' }
             if (-not ($names -contains 'MisterDownloadManager-Source-Patch/UPSTREAM-SOURCE.txt')) { throw 'Missing full source access directions' }
+            if (@($names | Where-Object { $_ -match '/builder/(upstream|dist|target|\.git|__pycache__)/' }).Count -gt 0) {
+              throw 'Source patch ZIP contains generated/untracked builder directory data'
+            }
+            if (@($names | Where-Object { $_ -match '/builder/.+\.(exe|dll|pdb|obj|zip|env)$' }).Count -gt 0) {
+              throw 'Source patch ZIP contains unexpected binaries, releases, or secrets'
+            }
           } finally { $sourceArchive.Dispose() }
           Write-Host "Validated application SHA-256: $((Get-FileHash $zips[0].FullName -Algorithm SHA256).Hash.ToLower())"
           Write-Host "Validated source patch SHA-256: $((Get-FileHash $sourceZips[0].FullName -Algorithm SHA256).Hash.ToLower())"

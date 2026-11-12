@@ -1,4 +1,4 @@
-# Troubleshooting — Unified NATIVE Manager b1r4
+# Troubleshooting — Unified NATIVE Manager b1r5
 
 ## Manager fails to open
 
@@ -14,7 +14,7 @@ Check `Manager.ps1` and `Mister-Manager.cmd` are **both** beside `misterdownload
 
 ## “No ownership journal”
 
-This message comes only from the *portable-only unregister* function. It intentionally refuses to remove keys not previously registered by this script. To clean *verified old-installation* keys, use the distinct legacy scan/removal functions in the **same browser submenu**. The old legacy cleaner b1r2 was reported working; its registry safeguards remain but live b1r4 integration testing is still pending.
+This message comes only from the *portable-only unregister* function. It intentionally refuses to remove keys not previously registered by this script. To clean *verified old-installation* keys, use the distinct legacy scan/removal functions in the **same browser submenu**. The old legacy cleaner b1r2 was reported working; its registry safeguards remain but live b1r5 integration testing is still pending.
 
 ## Browser registration says “Existing key belongs to another installation”
 
@@ -50,3 +50,16 @@ This is an ownership conflict. Do not delete the key without inspecting its mani
 ## Upgrade and rollback
 
 Stop MDM completely. Back up the full `data/` directory and old standalone `.reg` backups. Replace the program files and unified console files, **never** the existing `data/` tree or owner journals. If you downgrade across data-schema changes, restore a matching older data backup. Re-register/repair the portable host after a folder move only if journal ownership is preserved. Unsigned binaries may show normal Windows security warnings; do not disable system security tools.
+
+## b1r4 `Source patch bundle unexpectedly large` after successful Rust compile
+
+**Cause:** The previous packager recursively archived the entire builder working
+tree while trying to include the small builder scripts. During CI this tree
+contains `upstream/target/` compiled Rust output and other generated content.
+The safety cap rejected that archive; it did **not** mean the NATIVE app ZIP was
+1 GB or that Rust compilation failed.
+
+**Fix:** Update the builder repository with b1r5 and run workflow_dispatch with
+revision `b1r5`. The source patch ZIP now uses `BUILDER_SOURCE_FILES` as an exact
+allowlist. The Rust build still runs from official source. No registry cleanup,
+browser repair, or Data reset is needed to resolve this packaging error.
